@@ -399,3 +399,5 @@ FodyWeavers.xsd
 
 # JetBrains Rider
 *.sln.iml
+ConsoleApplication4.vcxproj
+ConsoleApplication4.vcxproj.filters
