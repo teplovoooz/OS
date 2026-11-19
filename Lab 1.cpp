@@ -36,6 +36,7 @@ public:
 
         if (ready)
         {
+            lock.unlock();
             return;
         }
 
@@ -43,6 +44,8 @@ public:
         ready = true;
         std::cout << "[producer] sent " << data->text << std::endl;
         condition.notify_one();
+
+        lock.unlock();
     }
 
     void consume()
@@ -59,6 +62,8 @@ public:
         ready = false;
         std::cout << "[consumer] processed " << ev->text << std::endl;
         delete ev;
+
+        lock.unlock();
     }
 };
 
