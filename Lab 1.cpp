@@ -4,6 +4,7 @@
 #include <condition_variable>
 #include <chrono>
 #include <string>
+#include <windows.h>
 
 struct Event
 {
@@ -75,7 +76,7 @@ void producer(Monitor* mon)
 
     while (true)
     {
-        std::this_thread::sleep_for(std::chrono::seconds(1));
+       Sleep(1000);
 
         if (mon->provide(i))
         {
