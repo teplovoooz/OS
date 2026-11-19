@@ -30,14 +30,15 @@ public:
         data = nullptr;
     }
 
-    void provide(int i)
+    bool provide(int i)
     {
         std::unique_lock<std::mutex> lock(mutex);
 
         if (ready)
         {
+            std::cout << "[producer] busy, retry later" << std::endl;
             lock.unlock();
-            return;
+            return false;
         }
 
         data = new Event(i);
@@ -46,6 +47,7 @@ public:
         condition.notify_one();
 
         lock.unlock();
+        return true;
     }
 
     void consume()
@@ -74,8 +76,11 @@ void producer(Monitor* mon)
     while (true)
     {
         std::this_thread::sleep_for(std::chrono::seconds(1));
-        mon->provide(i);
-        i++;
+
+        if (mon->provide(i))
+        {
+            i++;
+        }
     }
 }
 
