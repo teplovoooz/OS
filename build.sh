@@ -1,111 +1,69 @@
 #!/bin/sh
 
-fail()
-{
-    printf '%s\n' "$2" >&2
-    exit "$1"
-}
+if [ "$#" -ne 1 ]; then
+    printf '%s\n' "Использование: sh build.sh файл.c" >&2
+    exit 2
+fi
 
-[ "$#" -eq 1 ] || fail 2 "Использование: sh build.sh путь/к/файлу.c"
+if [ "${1#/}" = "$1" ]; then
+    source=$PWD/$1
+else
+    source=$1
+fi
 
-case "$1" in
-    /*) source_file=$1 ;;
-    *)  source_file=$PWD/$1 ;;
-esac
+if [ "${source%.c}" = "$source" ]; then
+    printf '%s\n' "Ожидается файл с расширением .c." >&2
+    exit 2
+fi
 
-case "$source_file" in
-    *.c) ;;
-    *) fail 2 "Ожидается исходный файл с расширением .c." ;;
-esac
+if [ ! -f "$source" ] || [ ! -r "$source" ]; then
+    printf 'Не удалось открыть исходник: %s\n' "$source" >&2
+    exit 2
+fi
 
-[ -f "$source_file" ] && [ -r "$source_file" ] ||
-    fail 2 "Не удалось открыть исходник: $source_file"
+name=$(
+    sed -n 's|^[[:space:]]*//[[:space:]]*Output:[[:space:]]*||p' "$source" |
+        head -n 1 |
+        sed 's/[[:space:]]*$//'
+)
+if [ -z "$name" ] || [ "${name#*/}" != "$name" ] ||
+   [ "$name" = "." ] || [ "$name" = ".." ] || [ "$name" = "${source##*/}" ]; then
+    printf '%s\n' "Укажите допустимое имя в комментарии // Output: имя." >&2
+    exit 3
+fi
 
-output_name=$(LC_ALL=C awk '
-    /^[[:space:]]*\/\/[[:space:]]*Output:/ {
-        sub(/^[[:space:]]*\/\/[[:space:]]*Output:/, "")
-        name = $0
-        count++
-    }
-    /^[[:space:]]*\/\*[[:space:]]*Output:.*\*\/[[:space:]]*$/ {
-        sub(/^[[:space:]]*\/\*[[:space:]]*Output:/, "")
-        sub(/\*\/[[:space:]]*$/, "")
-        name = $0
-        count++
-    }
-    END {
-        sub(/^[[:space:]]+/, "", name)
-        sub(/[[:space:]]+$/, "", name)
-        if (count != 1 || name == "")
-            exit 1
-        print name
-    }
-' < "$source_file") ||
-    fail 3 "Укажите один комментарий Output: с именем выходного файла."
+dir=${source%/*}
+output=$dir/$name
 
-case "$output_name" in
-    */*|.|..|"${source_file##*/}")
-        fail 3 "Некорректное имя выходного файла: $output_name"
-        ;;
-esac
-
-source_dir=${source_file%/*}
-output_file=$source_dir/$output_name
-[ ! -d "$output_file" ] || fail 6 "Выходной путь занят каталогом: $output_file"
-
-command -v cc >/dev/null 2>&1 || fail 5 "Компилятор cc не найден."
-
-tmp_dir=
-compiler_pid=
-
-cleanup()
-{
-    status=$?
-    trap '' HUP INT QUIT TERM
-
-    if [ -n "$tmp_dir" ] && ! rm -rf "$tmp_dir"; then
-        printf 'Не удалось удалить временный каталог: %s\n' "$tmp_dir" >&2
-        if [ "$status" -eq 0 ]; then
-            status=7
-        fi
-    fi
-
-    exit "$status"
-}
-
-stop()
-{
-    if [ -n "$compiler_pid" ]; then
-        kill -s TERM "$compiler_pid" 2>/dev/null || :
-    fi
-    fail "$1" "Сборка прервана сигналом $2."
-}
-
-trap 'cleanup' 0
-trap 'stop 129 HUP' HUP
-trap 'stop 130 INT' INT
-trap 'stop 131 QUIT' QUIT
-trap 'stop 143 TERM' TERM
-
-tmp_dir=$(mktemp -d "$source_dir/.build.XXXXXXXX") ||
-    fail 4 "Не удалось создать временный каталог."
+if ! tmp=$(mktemp -d "$dir/.build.XXXXXXXX"); then
+    printf '%s\n' "Не удалось создать временный каталог." >&2
+    exit 4
+fi
 
 (
-    cd "$tmp_dir" || exit 4
-    TMPDIR=$tmp_dir TMP=$tmp_dir TEMP=$tmp_dir
-    export TMPDIR TMP TEMP
-    exec cc -std=c17 "$source_file" -o program -lm
-) &
-compiler_pid=$!
-
-wait "$compiler_pid"
+    cd "$tmp" || exit 1
+    export TMPDIR="$tmp"
+    cc -o result "$source"
+)
 compiler_status=$?
-compiler_pid=
 
-[ "$compiler_status" -eq 0 ] ||
-    fail 5 "Ошибка сборки: компилятор завершился с кодом $compiler_status."
+status=0
+if [ "$compiler_status" -ne 0 ]; then
+    printf 'Ошибка сборки (код компилятора %s).\n' "$compiler_status" >&2
+    status=5
+elif [ -d "$output" ] || ! mv -f "$tmp/result" "$output"; then
+    printf 'Не удалось сохранить результат: %s\n' "$output" >&2
+    status=6
+fi
 
-mv -f "$tmp_dir/program" "$output_file" ||
-    fail 6 "Не удалось сохранить результат: $output_file"
+if ! rm -rf "$tmp"; then
+    printf 'Не удалось удалить временный каталог: %s\n' "$tmp" >&2
+    if [ "$status" -eq 0 ]; then
+        status=7
+    fi
+fi
 
-printf 'Сборка завершена: %s\n' "$output_file"
+if [ "$status" -eq 0 ]; then
+    printf 'Сборка завершена: %s\n' "$output"
+fi
+exit "$status"
